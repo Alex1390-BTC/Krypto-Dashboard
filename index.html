@@ -412,6 +412,8 @@
             <button class="tab-btn active" onclick="switchTab(event, 'dashboard')">Dashboard</button>
             <button class="tab-btn" onclick="switchTab(event, 'backtest')">Backtest</button>
             <button class="tab-btn" onclick="switchTab(event, 'signals')">Signals</button>
+            <button class="tab-btn" onclick="switchTab(event, 'trades')">Trade History</button>
+            <button class="tab-btn" onclick="switchTab(event, 'chart')">Advanced Chart</button>
         </div>
 
         <!-- DASHBOARD TAB -->
@@ -440,8 +442,10 @@
             </div>
 
             <div class="chart-container">
-                <h3>Price Action - Last 90 Days</h3>
-                <canvas id="priceChart"></canvas>
+                <h3>📈 Price Action - Last 90 Days</h3>
+                <div style="position: relative; height: 400px;">
+                    <canvas id="priceChart"></canvas>
+                </div>
             </div>
         </div>
 
@@ -475,6 +479,83 @@
             <div id="signalsContainer">
                 <div class="loading">
                     Loading signals... <span class="spinner"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- TRADE HISTORY TAB -->
+        <div id="trades" class="tab-content">
+            <div style="margin-bottom: 20px;">
+                <label style="color: var(--accent); margin-right: 15px;">
+                    <strong>Select Strategy & Coin:</strong>
+                </label>
+                <select id="tradeStrategySelect" onchange="displayTradeHistory()" style="width: 300px;">
+                    <option value="">-- Select a result from backtest first --</option>
+                </select>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Entry Price</th>
+                        <th>Exit Price</th>
+                        <th>Type</th>
+                        <th>Size (Units)</th>
+                        <th>P&L ($)</th>
+                        <th>P&L (%)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="tradeHistoryTable">
+                    <tr>
+                        <td colspan="8" style="text-align: center; color: var(--gray);">Run backtest and select a strategy</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ADVANCED CHART TAB -->
+        <div id="chart" class="tab-content">
+            <div style="margin-bottom: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <div class="control-group">
+                    <label>📊 Select Coin</label>
+                    <select id="chartCoinSelect" onchange="loadChartData()">
+                        <option value="bitcoin">Bitcoin</option>
+                        <option value="ethereum">Ethereum</option>
+                        <option value="ripple">Ripple</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>📈 Select Strategy</label>
+                    <select id="chartStrategySelect" onchange="loadChartData()">
+                        <option value="EMA_CROSSOVER">EMA Crossover</option>
+                        <option value="RSI_MEAN_REVERSION">RSI Mean Reversion</option>
+                    </select>
+                </div>
+                <div class="control-group" style="display: flex; align-items: flex-end;">
+                    <button onclick="loadChartData()" style="width: 100%;">Load Chart</button>
+                </div>
+            </div>
+
+            <div class="chart-container">
+                <h3>🕯️ Price with Entry/Exit Signals</h3>
+                <div style="position: relative; height: 500px;">
+                    <canvas id="tradingViewChart"></canvas>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px;">
+                <div class="chart-container">
+                    <h3>📊 RSI Indicator</h3>
+                    <div style="position: relative; height: 250px;">
+                        <canvas id="rsiChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <h3>🔄 EMA (12/26)</h3>
+                    <div style="position: relative; height: 250px;">
+                        <canvas id="emaChart"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -583,74 +664,9 @@
             return rsi;
         }
 
-        // Backtest EMA Crossover
-        function backtestEMACrossover(prices) {
-            const ema12 = calculateEMA(prices, 12);
-            const ema26 = calculateEMA(prices, 26);
-            let trades = [];
-            let position = null;
-            let equity = [state.capital];
 
-            for (let i = 27; i < prices.length; i++) {
-                const price = prices[i];
-                const currentEquity = equity[equity.length - 1];
 
-                if (!position && ema12[i] > ema26[i] && ema12[i - 1] <= ema26[i - 1]) {
-                    const riskAmount = currentEquity * state.risk / 100;
-                    const stopLoss = price * 0.98;
-                    const takeProfit = price + (price - stopLoss) * 2;
-                    position = {
-                        entry: price,
-                        sl: stopLoss,
-                        tp: takeProfit,
-                        size: riskAmount / (price - stopLoss)
-                    };
-                } else if (position && (price <= position.sl || price >= position.tp)) {
-                    const exit = price > position.tp ? position.tp : position.sl;
-                    const pnl = (exit - position.entry) * position.size;
-                    trades.push(pnl);
-                    equity.push(currentEquity + pnl);
-                    position = null;
-                }
-            }
-
-            return { trades, equity };
-        }
-
-        // Backtest RSI Mean Reversion
-        function backtestRSI(prices) {
-            const rsi = calculateRSI(prices, 14);
-            let trades = [];
-            let position = null;
-            let equity = [state.capital];
-
-            for (let i = 15; i < prices.length; i++) {
-                const price = prices[i];
-                const currentEquity = equity[equity.length - 1];
-
-                if (!position && rsi[i - 15] < 30) {
-                    const riskAmount = currentEquity * state.risk / 100;
-                    const stopLoss = price * 0.97;
-                    const takeProfit = price + (price - stopLoss) * 2;
-                    position = {
-                        entry: price,
-                        sl: stopLoss,
-                        tp: takeProfit,
-                        size: riskAmount / (price - stopLoss)
-                    };
-                } else if (position && (price <= position.sl || price >= position.tp)) {
-                    const exit = price > position.tp ? position.tp : position.sl;
-                    const pnl = (exit - position.entry) * position.size;
-                    trades.push(pnl);
-                    equity.push(currentEquity + pnl);
-                    position = null;
-                }
-            }
-
-            return { trades, equity };
-        }
-
-        // Calculate stats
+        // Calculate stats - KORRIGIERT
         function calculateStats(trades) {
             if (trades.length === 0) return null;
             
@@ -659,12 +675,23 @@
             const totalProfit = wins.reduce((a, b) => a + b, 0);
             const totalLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
 
-            let maxDD = 0;
-            let peak = state.capital;
+            // Berechne gesamte Equity Curve korrekt
+            let equity = [state.capital];
             for (let t of trades) {
-                peak = Math.max(peak, peak + t);
-                const dd = ((peak - (peak + t)) / peak) * 100;
-                if (dd > maxDD) maxDD = dd;
+                equity.push(equity[equity.length - 1] + t);
+            }
+
+            // Berechne Max Drawdown korrekt über die gesamte Equity Curve
+            let maxDD = 0;
+            let peak = equity[0];
+            for (let i = 1; i < equity.length; i++) {
+                if (equity[i] > peak) {
+                    peak = equity[i];
+                }
+                const dd = ((peak - equity[i]) / peak) * 100;
+                if (dd > maxDD) {
+                    maxDD = dd;
+                }
             }
 
             return {
@@ -677,62 +704,7 @@
             };
         }
 
-        // Run backtest
-        async function runBacktest() {
-            const btn = document.getElementById('backtestBtn');
-            btn.disabled = true;
-            btn.innerHTML = '<span class="spinner"></span> Running...';
-            
-            document.getElementById('backtestAlert').style.display = 'block';
 
-            try {
-                state.risk = parseFloat(document.getElementById('riskInput').value);
-                state.capital = parseInt(document.getElementById('capitalInput').value);
-                state.coins = getSelectedCoins();
-
-                state.backtestResults = [];
-
-                for (const coin of state.coins) {
-                    const prices = await fetchHistoricalData(coin);
-                    if (!prices || prices.length < 50) continue;
-
-                    state.historicalData[coin] = prices;
-
-                    // EMA Crossover
-                    const { trades: emaTrades } = backtestEMACrossover(prices);
-                    const emaStats = calculateStats(emaTrades);
-                    if (emaStats) {
-                        state.backtestResults.push({
-                            coin: coin.toUpperCase(),
-                            strategy: 'EMA Crossover',
-                            ...emaStats
-                        });
-                    }
-
-                    // RSI Mean Reversion
-                    const { trades: rsiTrades } = backtestRSI(prices);
-                    const rsiStats = calculateStats(rsiTrades);
-                    if (rsiStats) {
-                        state.backtestResults.push({
-                            coin: coin.toUpperCase(),
-                            strategy: 'RSI Mean Reversion',
-                            ...rsiStats
-                        });
-                    }
-                }
-
-                displayBacktestResults();
-                updateDashboard();
-
-            } catch (error) {
-                console.error('Backtest error:', error);
-                alert('Error: ' + error.message);
-            } finally {
-                btn.disabled = false;
-                btn.innerHTML = '🔄 Run Backtest';
-                document.getElementById('backtestAlert').style.display = 'none';
-            }
-        }
 
         // Display backtest results
         function displayBacktestResults() {
@@ -805,6 +777,409 @@
                 `;
                 container.appendChild(signalDiv);
             }
+        }
+
+        // Store trade details for history
+        const tradeHistory = {};
+
+        // Backtest mit Trade Details - EMA Crossover
+        function backtestEMACrossoverDetailed(prices, coinName, strategyName) {
+            const ema12 = calculateEMA(prices, 12);
+            const ema26 = calculateEMA(prices, 26);
+            let trades = [];
+            let position = null;
+            let equity = [state.capital];
+            let tradeList = [];
+
+            for (let i = 27; i < prices.length; i++) {
+                const price = prices[i];
+                const currentEquity = equity[equity.length - 1];
+
+                if (!position && ema12[i] > ema26[i] && ema12[i - 1] <= ema26[i - 1]) {
+                    const riskAmount = currentEquity * state.risk / 100;
+                    const stopLoss = price * 0.98;
+                    const takeProfit = price + (price - stopLoss) * 2;
+                    position = {
+                        entry: price,
+                        entryBar: i,
+                        sl: stopLoss,
+                        tp: takeProfit,
+                        size: riskAmount / (price - stopLoss)
+                    };
+                } else if (position && (price <= position.sl || price >= position.tp)) {
+                    const exit = price > position.tp ? position.tp : position.sl;
+                    const pnl = (exit - position.entry) * position.size;
+                    const pnlPercent = (pnl / (position.entry * position.size)) * 100;
+                    
+                    trades.push(pnl);
+                    equity.push(currentEquity + pnl);
+                    
+                    tradeList.push({
+                        entryPrice: position.entry,
+                        exitPrice: exit,
+                        size: position.size,
+                        pnl: pnl,
+                        pnlPercent: pnlPercent,
+                        type: exit > position.entry ? 'LONG' : 'SHORT',
+                        bars: i - position.entryBar
+                    });
+                    
+                    position = null;
+                }
+            }
+
+            const key = `${coinName}_${strategyName}`;
+            tradeHistory[key] = tradeList;
+            return { trades, equity };
+        }
+
+        // Backtest mit Trade Details - RSI
+        function backtestRSIDetailed(prices, coinName, strategyName) {
+            const rsi = calculateRSI(prices, 14);
+            let trades = [];
+            let position = null;
+            let equity = [state.capital];
+            let tradeList = [];
+
+            for (let i = 15; i < prices.length; i++) {
+                const price = prices[i];
+                const currentEquity = equity[equity.length - 1];
+
+                if (!position && rsi[i - 15] < 30) {
+                    const riskAmount = currentEquity * state.risk / 100;
+                    const stopLoss = price * 0.97;
+                    const takeProfit = price + (price - stopLoss) * 2;
+                    position = {
+                        entry: price,
+                        entryBar: i,
+                        sl: stopLoss,
+                        tp: takeProfit,
+                        size: riskAmount / (price - stopLoss)
+                    };
+                } else if (position && (price <= position.sl || price >= position.tp)) {
+                    const exit = price > position.tp ? position.tp : position.sl;
+                    const pnl = (exit - position.entry) * position.size;
+                    const pnlPercent = (pnl / (position.entry * position.size)) * 100;
+                    
+                    trades.push(pnl);
+                    equity.push(currentEquity + pnl);
+                    
+                    tradeList.push({
+                        entryPrice: position.entry,
+                        exitPrice: exit,
+                        size: position.size,
+                        pnl: pnl,
+                        pnlPercent: pnlPercent,
+                        type: 'LONG',
+                        bars: i - position.entryBar
+                    });
+                    
+                    position = null;
+                }
+            }
+
+            const key = `${coinName}_${strategyName}`;
+            tradeHistory[key] = tradeList;
+            return { trades, equity };
+        }
+
+        // Updated Backtest mit DetailTracking
+        async function runBacktest() {
+            const btn = document.getElementById('backtestBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Running...';
+            
+            document.getElementById('backtestAlert').style.display = 'block';
+
+            try {
+                state.risk = parseFloat(document.getElementById('riskInput').value);
+                state.capital = parseInt(document.getElementById('capitalInput').value);
+                state.coins = getSelectedCoins();
+
+                state.backtestResults = [];
+
+                for (const coin of state.coins) {
+                    const prices = await fetchHistoricalData(coin);
+                    if (!prices || prices.length < 50) continue;
+
+                    state.historicalData[coin] = prices;
+
+                    // EMA Crossover mit Details
+                    const { trades: emaTrades } = backtestEMACrossoverDetailed(prices, coin.toUpperCase(), 'EMA Crossover');
+                    const emaStats = calculateStats(emaTrades);
+                    if (emaStats) {
+                        state.backtestResults.push({
+                            coin: coin.toUpperCase(),
+                            strategy: 'EMA Crossover',
+                            ...emaStats
+                        });
+                    }
+
+                    // RSI Mean Reversion mit Details
+                    const { trades: rsiTrades } = backtestRSIDetailed(prices, coin.toUpperCase(), 'RSI Mean Reversion');
+                    const rsiStats = calculateStats(rsiTrades);
+                    if (rsiStats) {
+                        state.backtestResults.push({
+                            coin: coin.toUpperCase(),
+                            strategy: 'RSI Mean Reversion',
+                            ...rsiStats
+                        });
+                    }
+                }
+
+                displayBacktestResults();
+                populateTradeStrategySelect();
+                updateDashboard();
+
+            } catch (error) {
+                console.error('Backtest error:', error);
+                alert('Error: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Run Backtest';
+                document.getElementById('backtestAlert').style.display = 'none';
+            }
+        }
+
+        // Populate Trade Strategy Select
+        function populateTradeStrategySelect() {
+            const select = document.getElementById('tradeStrategySelect');
+            select.innerHTML = '<option value="">-- Select --</option>';
+            
+            state.backtestResults.forEach((result, idx) => {
+                const option = document.createElement('option');
+                option.value = `${result.coin}_${result.strategy}`;
+                option.textContent = `${result.coin} - ${result.strategy} (${result.totalTrades} trades, ${result.winRate.toFixed(1)}% WR)`;
+                select.appendChild(option);
+            });
+        }
+
+        // Display Trade History
+        function displayTradeHistory() {
+            const select = document.getElementById('tradeStrategySelect');
+            const key = select.value;
+            const tbody = document.getElementById('tradeHistoryTable');
+            tbody.innerHTML = '';
+
+            if (!key || !tradeHistory[key]) {
+                tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--gray);">Select a strategy</td></tr>';
+                return;
+            }
+
+            const trades = tradeHistory[key];
+            trades.forEach((trade, idx) => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td>$${trade.entryPrice.toFixed(2)}</td>
+                    <td>$${trade.exitPrice.toFixed(2)}</td>
+                    <td>${trade.type}</td>
+                    <td>${trade.size.toFixed(4)}</td>
+                    <td class="${trade.pnl > 0 ? 'positive' : 'negative'}">$${trade.pnl.toFixed(2)}</td>
+                    <td class="${trade.pnl > 0 ? 'positive' : 'negative'}">${trade.pnlPercent.toFixed(2)}%</td>
+                    <td><span class="badge">${trade.pnl > 0 ? '✓ WIN' : '✗ LOSS'}</span></td>
+                `;
+            });
+        }
+
+        // Advanced Chart Data Loading
+        let chartsInstances = {};
+
+        async function loadChartData() {
+            const coin = document.getElementById('chartCoinSelect').value;
+            const strategy = document.getElementById('chartStrategySelect').value;
+
+            const prices = await fetchHistoricalData(coin);
+            if (!prices || prices.length < 50) {
+                alert('Not enough data');
+                return;
+            }
+
+            const last100 = prices.slice(-100);
+            const ema12 = calculateEMA(last100, 12);
+            const ema26 = calculateEMA(last100, 26);
+            const rsi = calculateRSI(last100, 14);
+
+            // Get trades for this strategy
+            const key = `${coin.toUpperCase()}_${strategy}`;
+            const trades = tradeHistory[key] || [];
+
+            drawTradingViewChart(last100, ema12, ema26, trades);
+            drawRSIChart(rsi);
+            drawEMAChart(last100, ema12, ema26);
+        }
+
+        function drawTradingViewChart(prices, ema12, ema26, trades) {
+            const ctx = document.getElementById('tradingViewChart');
+            if (!ctx) return;
+            if (chartsInstances['tradingView']) chartsInstances['tradingView'].destroy();
+
+            const labels = prices.map((_, i) => i);
+
+            // Mark buy/sell signals
+            const buyPoints = [];
+            const sellPoints = [];
+
+            trades.forEach((trade, idx) => {
+                buyPoints.push({ x: idx, y: trade.entryPrice });
+                sellPoints.push({ x: idx, y: trade.exitPrice });
+            });
+
+            chartsInstances['tradingView'] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Price',
+                            data: prices,
+                            borderColor: 'var(--accent)',
+                            backgroundColor: 'rgba(0, 212, 170, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2,
+                            pointRadius: 0
+                        },
+                        {
+                            label: 'EMA 12',
+                            data: ema12.slice(-prices.length),
+                            borderColor: '#3498db',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'EMA 26',
+                            data: ema26.slice(-prices.length),
+                            borderColor: '#f39c12',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Buy Signals',
+                            type: 'scatter',
+                            data: buyPoints,
+                            pointRadius: 8,
+                            pointBackgroundColor: '#00d4aa',
+                            showLine: false
+                        },
+                        {
+                            label: 'Sell Signals',
+                            type: 'scatter',
+                            data: sellPoints,
+                            pointRadius: 8,
+                            pointBackgroundColor: '#ff4757',
+                            showLine: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#a0a0a0' } } },
+                    scales: {
+                        y: { beginAtZero: false, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0a0a0' } },
+                        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0a0a0' } }
+                    }
+                }
+            });
+        }
+
+        function drawRSIChart(rsi) {
+            const ctx = document.getElementById('rsiChart');
+            if (!ctx) return;
+            if (chartsInstances['rsi']) chartsInstances['rsi'].destroy();
+
+            chartsInstances['rsi'] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: rsi.map((_, i) => i),
+                    datasets: [
+                        {
+                            label: 'RSI (14)',
+                            data: rsi,
+                            borderColor: '#3498db',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Overbought (70)',
+                            data: Array(rsi.length).fill(70),
+                            borderColor: '#ff4757',
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Oversold (30)',
+                            data: Array(rsi.length).fill(30),
+                            borderColor: '#00d4aa',
+                            borderDash: [5, 5],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#a0a0a0' } } },
+                    scales: {
+                        y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0a0a0' } },
+                        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0a0a0' } }
+                    }
+                }
+            });
+        }
+
+        function drawEMAChart(prices, ema12, ema26) {
+            const ctx = document.getElementById('emaChart');
+            if (!ctx) return;
+            if (chartsInstances['ema']) chartsInstances['ema'].destroy();
+
+            chartsInstances['ema'] = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: prices.map((_, i) => i),
+                    datasets: [
+                        {
+                            label: 'Price',
+                            data: prices,
+                            borderColor: 'var(--accent)',
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'EMA 12',
+                            data: ema12.slice(-prices.length),
+                            borderColor: '#3498db',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'EMA 26',
+                            data: ema26.slice(-prices.length),
+                            borderColor: '#f39c12',
+                            borderWidth: 2,
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { labels: { color: '#a0a0a0' } } },
+                    scales: {
+                        y: { beginAtZero: false, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0a0a0' } },
+                        x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#a0a0a0' } }
+                    }
+                }
+            });
         }
 
         // Initialize
