@@ -411,7 +411,8 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab(event, 'dashboard')">Dashboard</button>
             <button class="tab-btn" onclick="switchTab(event, 'backtest')">Backtest</button>
-            <button class="tab-btn" onclick="switchTab(event, 'signals')">Signals</button>
+            <button class="tab-btn" onclick="switchTab(event, 'signals')">Live Signals</button>
+            <button class="tab-btn" onclick="switchTab(event, 'signal-history')">Signal History</button>
             <button class="tab-btn" onclick="switchTab(event, 'trades')">Trade History</button>
             <button class="tab-btn" onclick="switchTab(event, 'chart')">Advanced Chart</button>
         </div>
@@ -479,6 +480,53 @@
             <div id="signalsContainer">
                 <div class="loading">
                     Loading signals... <span class="spinner"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIGNAL HISTORY TAB -->
+        <div id="signal-history" class="tab-content">
+            <div style="margin-bottom: 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <div class="control-group">
+                    <label>📊 Select Coin</label>
+                    <select id="signalHistoryCoinSelect" onchange="displaySignalHistory()">
+                        <option value="bitcoin">Bitcoin</option>
+                        <option value="ethereum">Ethereum</option>
+                        <option value="ripple">Ripple</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>📈 Select Strategy</label>
+                    <select id="signalHistoryStrategySelect" onchange="displaySignalHistory()">
+                        <option value="EMA_CROSSOVER">EMA Crossover</option>
+                        <option value="RSI_MEAN_REVERSION">RSI Mean Reversion</option>
+                    </select>
+                </div>
+            </div>
+
+            <table>
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>Signal</th>
+                        <th>Price</th>
+                        <th>EMA 12</th>
+                        <th>EMA 26</th>
+                        <th>RSI (14)</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody id="signalHistoryTable">
+                    <tr>
+                        <td colspan="7" style="text-align: center; color: var(--gray);">Run backtest first</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <div class="chart-container" style="margin-top: 30px;">
+                <h3>📊 Signal Distribution</h3>
+                <div style="position: relative; height: 300px;">
+                    <canvas id="signalDistributionChart"></canvas>
                 </div>
             </div>
         </div>
@@ -779,8 +827,225 @@
             }
         }
 
-        // Store trade details for history
-        const tradeHistory = {};
+        // Store signal details für Signal History
+        const signalHistory = {};
+
+        // Berechne EMA Crossover Signale mit Details
+        function getEMACrossoverSignals(prices) {
+            const ema12 = calculateEMA(prices, 12);
+            const ema26 = calculateEMA(prices, 26);
+            const rsi = calculateRSI(prices, 14);
+            const signals = [];
+
+            for (let i = 28; i < prices.length; i++) {
+                const price = prices[i];
+                const isCrossover = ema12[i] > ema26[i] && ema12[i - 1] <= ema26[i - 1];
+                
+                if (isCrossover) {
+                    signals.push({
+                        index: i,
+                        signal: 'BUY',
+                        price: price,
+                        ema12: ema12[i],
+                        ema26: ema26[i],
+                        rsi: rsi[i - 14] || 0,
+                        type: 'crossover'
+                    });
+                }
+
+                // Auch SELL Signale tracken (wenn Crossover nach unten)
+                if (i > 0 && ema12[i] < ema26[i] && ema12[i - 1] >= ema26[i - 1]) {
+                    signals.push({
+                        index: i,
+                        signal: 'SELL',
+                        price: price,
+                        ema12: ema12[i],
+                        ema26: ema26[i],
+                        rsi: rsi[i - 14] || 0,
+                        type: 'crossover_sell'
+                    });
+                }
+            }
+
+            return signals;
+        }
+
+        // Berechne RSI Mean Reversion Signale mit Details
+        function getRSISignals(prices) {
+            const rsi = calculateRSI(prices, 14);
+            const ema12 = calculateEMA(prices, 12);
+            const ema26 = calculateEMA(prices, 26);
+            const signals = [];
+
+            for (let i = 15; i < prices.length; i++) {
+                const price = prices[i];
+                const rsiVal = rsi[i - 15];
+
+                // BUY wenn oversold
+                if (rsiVal < 30) {
+                    signals.push({
+                        index: i,
+                        signal: 'BUY',
+                        price: price,
+                        ema12: ema12[i],
+                        ema26: ema26[i],
+                        rsi: rsiVal,
+                        type: 'oversold'
+                    });
+                }
+
+                // SELL wenn overbought
+                if (rsiVal > 70) {
+                    signals.push({
+                        index: i,
+                        signal: 'SELL',
+                        price: price,
+                        ema12: ema12[i],
+                        ema26: ema26[i],
+                        rsi: rsiVal,
+                        type: 'overbought'
+                    });
+                }
+            }
+
+            return signals;
+        }
+
+        // Updated Backtest mit Signal Tracking
+        async function runBacktest() {
+            const btn = document.getElementById('backtestBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> Running...';
+            
+            document.getElementById('backtestAlert').style.display = 'block';
+
+            try {
+                state.risk = parseFloat(document.getElementById('riskInput').value);
+                state.capital = parseInt(document.getElementById('capitalInput').value);
+                state.coins = getSelectedCoins();
+
+                state.backtestResults = [];
+
+                for (const coin of state.coins) {
+                    const prices = await fetchHistoricalData(coin);
+                    if (!prices || prices.length < 50) continue;
+
+                    state.historicalData[coin] = prices;
+
+                    // EMA Crossover mit Details & Signals
+                    const { trades: emaTrades } = backtestEMACrossoverDetailed(prices, coin.toUpperCase(), 'EMA Crossover');
+                    const emaStats = calculateStats(emaTrades);
+                    const emaSignals = getEMACrossoverSignals(prices);
+                    signalHistory[`${coin.toUpperCase()}_EMA_CROSSOVER`] = emaSignals;
+
+                    if (emaStats) {
+                        state.backtestResults.push({
+                            coin: coin.toUpperCase(),
+                            strategy: 'EMA Crossover',
+                            ...emaStats
+                        });
+                    }
+
+                    // RSI Mean Reversion mit Details & Signals
+                    const { trades: rsiTrades } = backtestRSIDetailed(prices, coin.toUpperCase(), 'RSI Mean Reversion');
+                    const rsiStats = calculateStats(rsiTrades);
+                    const rsiSignals = getRSISignals(prices);
+                    signalHistory[`${coin.toUpperCase()}_RSI_MEAN_REVERSION`] = rsiSignals;
+
+                    if (rsiStats) {
+                        state.backtestResults.push({
+                            coin: coin.toUpperCase(),
+                            strategy: 'RSI Mean Reversion',
+                            ...rsiStats
+                        });
+                    }
+                }
+
+                displayBacktestResults();
+                populateTradeStrategySelect();
+                updateDashboard();
+
+            } catch (error) {
+                console.error('Backtest error:', error);
+                alert('Error: ' + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '🔄 Run Backtest';
+                document.getElementById('backtestAlert').style.display = 'none';
+            }
+        }
+
+        // Display Signal History
+        function displaySignalHistory() {
+            const coin = document.getElementById('signalHistoryCoinSelect').value.toUpperCase();
+            const strategy = document.getElementById('signalHistoryStrategySelect').value;
+            const key = `${coin}_${strategy}`;
+            
+            const tbody = document.getElementById('signalHistoryTable');
+            tbody.innerHTML = '';
+
+            if (!signalHistory[key] || signalHistory[key].length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--gray);">Run backtest first</td></tr>';
+                return;
+            }
+
+            const signals = signalHistory[key];
+            signals.forEach((sig, idx) => {
+                const row = tbody.insertRow();
+                const isGreen = sig.signal === 'BUY';
+                row.innerHTML = `
+                    <td>${idx + 1}</td>
+                    <td><span class="badge" style="background: ${isGreen ? 'rgba(0, 212, 170, 0.2)' : 'rgba(255, 71, 87, 0.2)'}; color: ${isGreen ? 'var(--accent)' : 'var(--red)'}">${sig.signal}</span></td>
+                    <td>$${sig.price.toFixed(2)}</td>
+                    <td>${sig.ema12.toFixed(2)}</td>
+                    <td>${sig.ema26.toFixed(2)}</td>
+                    <td>${sig.rsi.toFixed(1)}</td>
+                    <td style="font-size: 0.85em; color: var(--gray);">${sig.type}</td>
+                `;
+            });
+
+            // Draw Signal Distribution Chart
+            drawSignalDistributionChart(signals);
+        }
+
+        function drawSignalDistributionChart(signals) {
+            const buys = signals.filter(s => s.signal === 'BUY').length;
+            const sells = signals.filter(s => s.signal === 'SELL').length;
+
+            const ctx = document.getElementById('signalDistributionChart');
+            if (!ctx) return;
+            if (chartsInstances['signalDist']) chartsInstances['signalDist'].destroy();
+
+            chartsInstances['signalDist'] = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['BUY Signals', 'SELL Signals'],
+                    datasets: [{
+                        label: 'Count',
+                        data: [buys, sells],
+                        backgroundColor: ['var(--accent)', 'var(--red)'],
+                        borderRadius: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#a0a0a0' }
+                        },
+                        y: {
+                            ticks: { color: '#a0a0a0' }
+                        }
+                    }
+                }
+            });
+        }
 
         // Backtest mit Trade Details - EMA Crossover
         function backtestEMACrossoverDetailed(prices, coinName, strategyName) {
